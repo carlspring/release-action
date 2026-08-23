@@ -16,7 +16,7 @@ Usage:
                       [--aliases v1 v1.0]
 """
 import argparse
-from datetime import datetime, timezone
+from datetime import datetime
 import os
 import subprocess
 import sys
@@ -160,6 +160,7 @@ class GitHubClient:
         for pr in prs:
             del pr["merged_at"]
         return prs
+
 
 def get_previous_tag():
     """Return the most recent tag reachable from HEAD, or None if there isn't one."""
