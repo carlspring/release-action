@@ -16,11 +16,10 @@ Usage:
                       [--aliases v1 v1.0]
 """
 import argparse
+from datetime import datetime, timezone
 import os
 import subprocess
 import sys
-import textwrap
-
 import requests
 
 API_URL = "https://api.github.com"
@@ -79,6 +78,88 @@ class GitHubClient:
         if resp.status_code not in (204, 404):
             resp.raise_for_status()
 
+    def get_tag_date(self, tag_name):
+        """Return the ISO-8601 date when tag_name was created, or None."""
+        url = f"{API_URL}/repos/{self.repo}/git/refs/tags/{tag_name}"
+        resp = self.session.get(url)
+        if resp.status_code == 404:
+            return None
+        resp.raise_for_status()
+        ref = resp.json()
+        obj = ref.get("object", {})
+        obj_url = obj.get("url")
+        if not obj_url:
+            return None
+        obj_resp = self.session.get(obj_url)
+        obj_resp.raise_for_status()
+        obj_data = obj_resp.json()
+        # Annotated tag: tagger.date; lightweight tag (commit): committer.date
+        if obj_data.get("type") == "tag":
+            return obj_data.get("tagger", {}).get("date")
+        if obj_data.get("type") == "commit":
+            return obj_data.get("committer", {}).get("date")
+        return None
+
+    def get_merged_prs_since(self, since_date, base=None):
+        """Return a list of PRs merged into *base* after since_date, in ascending merge order.
+
+        If since_date is None, all merged closed PRs are returned.
+        If base is None, PRs merged into any branch are returned.
+        Each item is a dict with keys: number, title, html_url, user.
+
+        All pages are fetched and filtered in Python so that unreliable sort
+        order (the API sorts by 'updated', not 'merged_at') does not cause
+        merged PRs to be silently skipped.
+        """
+        since_dt = (
+            datetime.fromisoformat(since_date.replace("Z", "+00:00"))
+            if since_date
+            else None
+        )
+        url = f"{API_URL}/repos/{self.repo}/pulls"
+        params = {
+            "state": "closed",
+            "sort": "updated",
+            "direction": "desc",
+            "per_page": 100,
+        }
+        if base:
+            params["base"] = base
+        prs = []
+        while url:
+            resp = self.session.get(url, params=params)
+            resp.raise_for_status()
+            page = resp.json()
+            if not page:
+                break
+            for pr in page:
+                merged_at = pr.get("merged_at")
+                if not merged_at:
+                    continue
+                merged_dt = datetime.fromisoformat(merged_at.replace("Z", "+00:00"))
+                if since_dt and merged_dt <= since_dt:
+                    continue
+                prs.append({
+                    "number": pr["number"],
+                    "title": pr["title"],
+                    "html_url": pr["html_url"],
+                    "user": pr["user"]["login"],
+                    "merged_at": merged_dt,
+                })
+            # Follow Link header pagination
+            link = resp.headers.get("Link", "")
+            url = None
+            params = {}
+            for part in link.split(","):
+                part = part.strip()
+                if 'rel="next"' in part:
+                    url = part.split(";")[0].strip().strip("<>")
+                    break
+        prs.sort(key=lambda p: p["merged_at"])
+        # Drop the internal merged_at field before returning
+        for pr in prs:
+            del pr["merged_at"]
+        return prs
 
 def get_previous_tag():
     """Return the most recent tag reachable from HEAD, or None if there isn't one."""
@@ -91,14 +172,37 @@ def get_previous_tag():
     return result.stdout.strip()
 
 
-def get_commits_since(previous_tag):
-    """Return a changelog string of commits since previous_tag (or full history)."""
-    rev_range = f"{previous_tag}..HEAD" if previous_tag else "HEAD"
-    log = run(
-        ["git", "log", rev_range, "--pretty=format:- %s (%h)", "--no-merges"],
-        check=False,
-    )
-    return log if log else "No changes recorded."
+def build_release_body(gh, previous_tag, alias_list, target_branch=None):
+    """Build the GitHub release body from merged PRs since previous_tag.
+
+    Falls back to a commit log when the GitHub API returns no PRs.
+    target_branch is passed to the GitHub API to filter PRs by base branch.
+    """
+    since_date = gh.get_tag_date(previous_tag) if previous_tag else None
+
+    pr_list = gh.get_merged_prs_since(since_date, base=target_branch)
+    if pr_list:
+        lines = [
+            (f'* <a href="{pr["html_url"]}">'
+             f'#{pr["number"]}: {pr["title"]}</a> (by @{pr["user"]})')
+            for pr in pr_list
+        ]
+        changelog = "\n".join(lines)
+    else:
+        # Fall back to git log when no PRs are found
+        rev_range = f"{previous_tag}..HEAD" if previous_tag else "HEAD"
+        log = run(
+            ["git", "log", rev_range, "--pretty=format:- %s (%h)", "--no-merges"],
+            check=False,
+        )
+        changelog = log if log else "No changes recorded."
+
+    sections = [f"## Changes since {previous_tag or 'the beginning'}\n\n{changelog}"]
+
+    for alias in alias_list:
+        sections.append(f"This release is marked as the current {alias}")
+
+    return "\n\n".join(sections)
 
 
 def create_git_tag(tag_name, message):
@@ -167,19 +271,15 @@ def main():
         previous_tag = get_previous_tag()
         print(f"Previous tag: {previous_tag or '(none found)'}")
 
-        changelog = get_commits_since(previous_tag)
-        print("Changelog:\n" + changelog)
-
         # 1. Create and push the git tag
         create_git_tag(args.tag, f"Release {args.tag}")
         tag_created = True
 
-        # 2. Create the GitHub release from that tag
-        body = textwrap.dedent(f"""\
-            ## Changes since {previous_tag or 'the beginning'}
+        # 2. Build release body from merged PRs since the previous tag
+        body = build_release_body(gh, previous_tag, alias_list, target_branch=args.target)
+        print("Release body:\n" + body)
 
-            {changelog}
-        """)
+        # 3. Create the GitHub release from that tag
         release = gh.create_release(
             tag_name=args.tag,
             target_commitish=args.target,
@@ -190,7 +290,7 @@ def main():
         )
         print(f"Created release: {release['html_url']}")
 
-        # 3. Create alias tags (e.g. v1, v1.0) pointing at the same commit
+        # 4. Create alias tags (e.g. v1, v1.0) pointing at the same commit
         for alias in alias_list:
             create_alias_tag(alias, args.tag)
             aliases_created.append(alias)
