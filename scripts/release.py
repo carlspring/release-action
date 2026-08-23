@@ -105,7 +105,7 @@ class GitHubClient:
 
         If since_date is None, all merged closed PRs are returned.
         If base is None, PRs merged into any branch are returned.
-        Each item is a dict with keys: number, title, html_url, user.
+        Each item is a dict with keys: number, title, html_url, user, assignees.
 
         All pages are fetched and filtered in Python so that unreliable sort
         order (the API sorts by 'updated', not 'merged_at') does not cause
@@ -144,6 +144,7 @@ class GitHubClient:
                     "title": pr["title"],
                     "html_url": pr["html_url"],
                     "user": pr["user"]["login"],
+                    "assignees": [a["login"] for a in (pr.get("assignees") or [])],
                     "merged_at": merged_dt,
                 })
             # Follow Link header pagination
@@ -160,6 +161,25 @@ class GitHubClient:
         for pr in prs:
             del pr["merged_at"]
         return prs
+
+
+def _format_pr_attribution(pr):
+    """Return the attribution string for a PR, e.g. '@carlspring, @Copilot'.
+
+    Rules:
+    - Bot-suffix usernames like 'dependabot[bot]' are normalised to 'dependabot'.
+    - PRs authored by Copilot list the non-Copilot assignees first, then @Copilot.
+    """
+    def clean(login):
+        return login.replace("[bot]", "")
+
+    author = clean(pr["user"])
+    # The GitHub Copilot SWE agent uses the plain login "Copilot" (no [bot] suffix).
+    if author == "Copilot":
+        others = [clean(a) for a in pr.get("assignees", []) if clean(a) != "Copilot"]
+        mentions = others + ["Copilot"]
+        return ", ".join(f"@{m}" for m in mentions)
+    return f"@{author}"
 
 
 def get_previous_tag():
@@ -185,7 +205,7 @@ def build_release_body(gh, previous_tag, alias_list, target_branch=None):
     if pr_list:
         lines = [
             (f'* <a href="{pr["html_url"]}">'
-             f'#{pr["number"]}: {pr["title"]}</a> (by @{pr["user"]})')
+             f'#{pr["number"]}: {pr["title"]}</a> ({_format_pr_attribution(pr)})')
             for pr in pr_list
         ]
         changelog = "\n".join(lines)
@@ -201,7 +221,7 @@ def build_release_body(gh, previous_tag, alias_list, target_branch=None):
     sections = [f"## Changes since {previous_tag or 'the beginning'}\n\n{changelog}"]
 
     for alias in alias_list:
-        sections.append(f"This release is marked as the current {alias}")
+        sections.append(f"This release is marked as the current `{alias}`.")
 
     return "\n\n".join(sections)
 
