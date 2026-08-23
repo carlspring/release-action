@@ -17,6 +17,11 @@ on:
         required: false
         default: false
         type: boolean
+      aliases:
+        description: 'Space-separated alias tags (e.g. "v1 v1.0")'
+        required: false
+        default: ''
+        type: string
 
 jobs:
   release:
@@ -37,6 +42,7 @@ jobs:
           tag: ${{ inputs.tag }}
           target: ${{ inputs.target }}
           prerelease: ${{ inputs.prerelease }}
+          aliases: ${{ inputs.aliases }}
 
       - name: Show result
         run: echo "Release created at ${{ steps.release.outputs.release_url }}"

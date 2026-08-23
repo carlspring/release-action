@@ -24,6 +24,13 @@ inputs:
     description: 'Mark the release as a pre-release'
     required: false
     default: 'false'
+  aliases:
+    description: >
+      Space-separated list of alias tags to create alongside the main release
+      tag (e.g. "v1 v1.0"). Each alias is a lightweight tag that points to the
+      same commit. Alias tags are deleted if rollback is triggered.
+    required: false
+    default: ''
   github-token:
     description: 'Token used to push the tag and manage the release'
     required: false
@@ -58,9 +65,10 @@ runs:
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}
         GITHUB_REPOSITORY: ${{ github.repository }}
+        RELEASE_ALIASES: ${{ inputs.aliases }}
       run: |
         python "${{ github.action_path }}/scripts/release.py" \
-          --tag "${{ inputs.tag }}" \
-          --target "${{ inputs.target }}" \
-          $( [ "${{ inputs.draft }}" = "true" ] && echo "--draft" ) \
-          $( [ "${{ inputs.prerelease }}" = "true" ] && echo "--prerelease" )
+        --tag "${{ inputs.tag }}" \
+        --target "${{ inputs.target }}" \
+        $( [ "${{ inputs.draft }}" = "true" ] && echo "--draft" ) \
+        $( [ "${{ inputs.prerelease }}" = "true" ] && echo "--prerelease" )

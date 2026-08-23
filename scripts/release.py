@@ -2,7 +2,7 @@
 """
 release.py — Create a git tag and a GitHub release built from the commits
 since the previous tag. If any step after tag creation fails, everything
-that was already created (tag, release) is rolled back.
+that was already created (tag, release, alias tags) is rolled back.
 
 Environment variables required:
     GITHUB_TOKEN        Token with permission to push tags and manage releases
@@ -13,6 +13,7 @@ Optional:
 
 Usage:
     python release.py --tag v1.2.3 [--target main] [--draft] [--prerelease]
+                      [--aliases v1 v1.0]
 """
 import argparse
 import os
@@ -105,6 +106,18 @@ def create_git_tag(tag_name, message):
     run(["git", "push", "origin", tag_name])
 
 
+def create_alias_tag(alias, tag_name):
+    """Create (or force-update) a lightweight alias tag pointing to the commit of tag_name.
+
+    Uses `rev-parse tag^{}` to dereference the tag to its underlying commit SHA
+    (a no-op for lightweight tags, but correct for annotated tags). run() returns
+    the stripped output, so the SHA is safe to pass directly to git tag.
+    """
+    commit_sha = run(["git", "rev-parse", f"{tag_name}^{{}}"])
+    run(["git", "tag", "-f", alias, commit_sha])
+    run(["git", "push", "--force", "origin", alias])
+
+
 def delete_git_tag(tag_name):
     """Best-effort deletion of a tag on the remote and locally."""
     subprocess.run(["git", "push", "--delete", "origin", tag_name],
@@ -121,7 +134,19 @@ def main():
     parser.add_argument("--target", default="main", help="Branch/commit the tag points to")
     parser.add_argument("--draft", action="store_true")
     parser.add_argument("--prerelease", action="store_true")
+    parser.add_argument(
+        "--aliases",
+        default="",
+        metavar="ALIAS_LIST",
+        help="Space-separated alias tags to create, e.g. 'v1 v1.0'. "
+             "Overridden by the RELEASE_ALIASES environment variable if set.",
+    )
     args = parser.parse_args()
+    # Allow aliases to be supplied via env var (avoids shell word-splitting issues).
+    # The env var takes precedence only when it is non-empty.
+    aliases_env = os.environ.get("RELEASE_ALIASES", "")
+    aliases_raw = aliases_env if aliases_env.strip() else args.aliases
+    alias_list = [a for a in aliases_raw.split() if a]
 
     token = os.environ.get("GITHUB_TOKEN")
     repo = os.environ.get("GITHUB_REPOSITORY")
@@ -133,6 +158,7 @@ def main():
 
     tag_created = False
     release = None
+    aliases_created = []
 
     try:
         run(["git", "config", "user.name", "github-actions[bot]"])
@@ -164,6 +190,12 @@ def main():
         )
         print(f"Created release: {release['html_url']}")
 
+        # 3. Create alias tags (e.g. v1, v1.0) pointing at the same commit
+        for alias in alias_list:
+            create_alias_tag(alias, args.tag)
+            aliases_created.append(alias)
+            print(f"Created alias tag: {alias}")
+
         set_output("tag", args.tag)
         set_output("release_id", release["id"])
         set_output("release_url", release["html_url"])
@@ -182,6 +214,10 @@ def main():
         if tag_created:
             delete_git_tag(args.tag)
             print(f"Deleted tag {args.tag}", file=sys.stderr)
+
+        for alias in aliases_created:
+            delete_git_tag(alias)
+            print(f"Deleted alias tag {alias}", file=sys.stderr)
 
         sys.exit(1)
 

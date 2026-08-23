@@ -13,7 +13,8 @@ and release if anything goes wrong partway through.
 - 🏷️ Creates and pushes an annotated git tag
 - 📝 Builds release notes from `git log <previous-tag>..HEAD`
 - 🚀 Publishes a GitHub release for that tag
-- ↩️ Rolls back the tag (and release, if it was already created) on any failure
+- 🔗 Optionally creates alias tags (e.g. `v1`, `v1.0`) pointing to the same commit
+- ↩️ Rolls back the tag, alias tags, and release on any failure
 - 🖥️ Implemented in plain Python — no extra runtime beyond what `setup-python` provides
 
 ## Usage
@@ -38,6 +39,11 @@ on:
         required: false
         default: false
         type: boolean
+      aliases:
+        description: 'Space-separated alias tags (e.g. "v1 v1.0")'
+        required: false
+        default: ''
+        type: string
 
 jobs:
   release:
@@ -58,6 +64,7 @@ jobs:
           tag: ${{ inputs.tag }}
           target: ${{ inputs.target }}
           prerelease: ${{ inputs.prerelease }}
+          aliases: ${{ inputs.aliases }}   # e.g. "v1 v1.0"
 
       - name: Show result
         run: echo "Release created at ${{ steps.release.outputs.release_url }}"
@@ -79,6 +86,7 @@ Trigger it from the **Actions** tab → **Create Release** → **Run workflow**.
 | `target`       | No       | `main`                | Branch or commit the tag should point to          |
 | `draft`        | No       | `false`               | Create the release as a draft                     |
 | `prerelease`   | No       | `false`               | Mark the release as a pre-release                 |
+| `aliases`      | No       | `''`                  | Space-separated alias tags, e.g. `"v1 v1.0"`      |
 | `github-token` | No       | `${{ github.token }}` | Token used to push the tag and manage the release |
 
 ## Outputs
@@ -106,12 +114,14 @@ The action tracks what it has created as it goes:
 
 1. Creates and pushes the git tag.
 2. Creates the GitHub release from that tag.
+3. Creates any alias tags (e.g. `v1`, `v1.0`).
 
-If step 2 (or anything else after the tag is pushed) raises an error, the
+If step 2 or 3 (or anything else after the tag is pushed) raises an error, the
 action:
 
 - Deletes the GitHub release, if one was created.
 - Deletes the git tag, both on the remote and locally.
+- Deletes any alias tags that were already created, both on the remote and locally.
 
 This keeps a failed run from leaving a dangling tag or an incomplete release
 behind. Rollback is best-effort: failures encountered while cleaning up are
