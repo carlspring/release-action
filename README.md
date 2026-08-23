@@ -1,4 +1,4 @@
-# Tag and Release with Rollback
+# GitHub Release Action
 
 [![CI](https://github.com/carlspring/release-action/actions/workflows/ci.yml/badge.svg)](https://github.com/carlspring/release-action/actions/workflows/ci.yml)
 [![LICENSE](https://img.shields.io/badge/License-Apache%202.0-brightgreen.svg)](https://github.com/carlspring/release-action/blob/master/LICENSE.Apache-2.0.md)
