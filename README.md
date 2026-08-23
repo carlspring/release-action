@@ -52,7 +52,7 @@ jobs:
       contents: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0   # full history + tags are needed to build the changelog
           ref: ${{ inputs.target }}
