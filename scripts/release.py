@@ -108,13 +108,15 @@ def create_git_tag(tag_name, message):
 def delete_git_tag(tag_name):
     """Best-effort deletion of a tag on the remote and locally."""
     subprocess.run(["git", "push", "--delete", "origin", tag_name],
-                    capture_output=True, text=True)
+                   capture_output=True, text=True)
     subprocess.run(["git", "tag", "-d", tag_name],
-                    capture_output=True, text=True)
+                   capture_output=True, text=True)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Create a tagged GitHub release with rollback on failure.")
+    parser = argparse.ArgumentParser(
+        description="Create a tagged GitHub release with rollback on failure."
+    )
     parser.add_argument("--tag", required=True, help="Tag to create, e.g. v1.2.3")
     parser.add_argument("--target", default="main", help="Branch/commit the tag points to")
     parser.add_argument("--draft", action="store_true")
