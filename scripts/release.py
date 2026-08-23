@@ -16,10 +16,10 @@ Usage:
                       [--aliases v1 v1.0]
 """
 import argparse
-from datetime import datetime
 import os
 import subprocess
 import sys
+import time
 import requests
 
 API_URL = "https://api.github.com"
@@ -78,88 +78,46 @@ class GitHubClient:
         if resp.status_code not in (204, 404):
             resp.raise_for_status()
 
-    def get_tag_date(self, tag_name):
-        """Return the ISO-8601 date when tag_name was created, or None."""
-        url = f"{API_URL}/repos/{self.repo}/git/refs/tags/{tag_name}"
-        resp = self.session.get(url)
-        if resp.status_code == 404:
-            return None
-        resp.raise_for_status()
-        ref = resp.json()
-        obj = ref.get("object", {})
-        obj_url = obj.get("url")
-        if not obj_url:
-            return None
-        obj_resp = self.session.get(obj_url)
-        obj_resp.raise_for_status()
-        obj_data = obj_resp.json()
-        # Annotated tag: tagger.date; lightweight tag (commit): committer.date
-        if obj_data.get("type") == "tag":
-            return obj_data.get("tagger", {}).get("date")
-        if obj_data.get("type") == "commit":
-            return obj_data.get("committer", {}).get("date")
-        return None
+    def get_prs_for_commits(self, commit_shas):
+        """Return a de-duplicated list of merged PRs that include any of the given commits.
 
-    def get_merged_prs_since(self, since_date, base=None):
-        """Return a list of PRs merged into *base* after since_date, in ascending merge order.
+        Uses GET /repos/{owner}/{repo}/commits/{sha}/pulls to resolve each SHA.
+        PRs are returned in ascending PR-number order (a reliable proxy for
+        merge order within a single repo).
 
-        If since_date is None, all merged closed PRs are returned.
-        If base is None, PRs merged into any branch are returned.
-        Each item is a dict with keys: number, title, html_url, user, assignees.
-
-        All pages are fetched and filtered in Python so that unreliable sort
-        order (the API sorts by 'updated', not 'merged_at') does not cause
-        merged PRs to be silently skipped.
+        Note: one API request is made per commit SHA. For very large commit ranges
+        (hundreds of commits) this may be slow and could approach GitHub API rate limits
+        (5,000 requests/hour for authenticated requests). In that case the release action
+        will surface the underlying HTTP error.
         """
-        since_dt = (
-            datetime.fromisoformat(since_date.replace("Z", "+00:00"))
-            if since_date
-            else None
-        )
-        url = f"{API_URL}/repos/{self.repo}/pulls"
-        params = {
-            "state": "closed",
-            "sort": "updated",
-            "direction": "desc",
-            "per_page": 100,
-        }
-        if base:
-            params["base"] = base
+        seen = set()
         prs = []
-        while url:
-            resp = self.session.get(url, params=params)
+        for sha in commit_shas:
+            url = f"{API_URL}/repos/{self.repo}/commits/{sha}/pulls"
+            resp = self.session.get(url)
+            if resp.status_code in (404, 422):
+                continue
+            if resp.status_code in (403, 429):
+                retry_after = int(resp.headers.get("Retry-After", "60"))
+                print(f"Rate limited; sleeping {retry_after}s before retrying {sha}",
+                      file=sys.stderr)
+                time.sleep(retry_after)
+                resp = self.session.get(url)
             resp.raise_for_status()
-            page = resp.json()
-            if not page:
-                break
-            for pr in page:
-                merged_at = pr.get("merged_at")
-                if not merged_at:
+            for pr in resp.json():
+                if pr["number"] in seen:
                     continue
-                merged_dt = datetime.fromisoformat(merged_at.replace("Z", "+00:00"))
-                if since_dt and merged_dt <= since_dt:
+                if not pr.get("merged_at"):
                     continue
+                seen.add(pr["number"])
                 prs.append({
                     "number": pr["number"],
                     "title": pr["title"],
                     "html_url": pr["html_url"],
                     "user": pr["user"]["login"],
                     "assignees": [a["login"] for a in (pr.get("assignees") or [])],
-                    "merged_at": merged_dt,
                 })
-            # Follow Link header pagination
-            link = resp.headers.get("Link", "")
-            url = None
-            params = {}
-            for part in link.split(","):
-                part = part.strip()
-                if 'rel="next"' in part:
-                    url = part.split(";")[0].strip().strip("<>")
-                    break
-        prs.sort(key=lambda p: p["merged_at"])
-        # Drop the internal merged_at field before returning
-        for pr in prs:
-            del pr["merged_at"]
+        prs.sort(key=lambda p: p["number"])
         return prs
 
 
@@ -193,15 +151,32 @@ def get_previous_tag():
     return result.stdout.strip()
 
 
-def build_release_body(gh, previous_tag, alias_list, target_branch=None):
+def get_commits_in_range(previous_tag):
+    """Return a list of commit SHAs reachable from HEAD but not from previous_tag.
+
+    If previous_tag is None, returns an empty list (caller will fall back to git log).
+    """
+    if not previous_tag:
+        return []
+    result = subprocess.run(
+        ["git", "log", f"{previous_tag}..HEAD", "--pretty=format:%H", "--no-merges"],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        return []
+    return [sha for sha in result.stdout.strip().splitlines() if sha]
+
+
+def build_release_body(gh, previous_tag, alias_list):
     """Build the GitHub release body from merged PRs since previous_tag.
 
-    Falls back to a commit log when the GitHub API returns no PRs.
-    target_branch is passed to the GitHub API to filter PRs by base branch.
+    Uses the git commit range (previous_tag..HEAD) to identify which commits
+    belong to this release, then resolves those commits to their associated PRs
+    via the GitHub API. Falls back to a plain git log when no PRs are found.
     """
-    since_date = gh.get_tag_date(previous_tag) if previous_tag else None
+    commit_shas = get_commits_in_range(previous_tag)
 
-    pr_list = gh.get_merged_prs_since(since_date, base=target_branch)
+    pr_list = gh.get_prs_for_commits(commit_shas) if commit_shas else []
     if pr_list:
         lines = [
             (f'* <a href="{pr["html_url"]}">'
@@ -297,7 +272,7 @@ def main():
         tag_created = True
 
         # 2. Build release body from merged PRs since the previous tag
-        body = build_release_body(gh, previous_tag, alias_list, target_branch=args.target)
+        body = build_release_body(gh, previous_tag, alias_list)
         print("Release body:\n" + body)
 
         # 3. Create the GitHub release from that tag
