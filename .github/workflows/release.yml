@@ -1,0 +1,42 @@
+name: Create Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to create (e.g. v1.2.3)'
+        required: true
+        type: string
+      target:
+        description: 'Branch or commit to tag'
+        required: false
+        default: 'main'
+        type: string
+      prerelease:
+        description: 'Mark as a pre-release'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # need full history + tags for the changelog
+          ref: ${{ inputs.target }}
+
+      - name: Tag and release
+        id: release
+        uses: carlspring/release-action@main   # or `uses: ./` if calling from this repo
+        with:
+          tag: ${{ inputs.tag }}
+          target: ${{ inputs.target }}
+          prerelease: ${{ inputs.prerelease }}
+
+      - name: Show result
+        run: echo "Release created at ${{ steps.release.outputs.release_url }}"

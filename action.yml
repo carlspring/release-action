@@ -1,0 +1,66 @@
+name: 'Tag and Release with Rollback'
+description: >
+  Creates a git tag and a GitHub release built from the commits since the
+  previous tag. If release creation fails, the tag (and any partially
+  created release) is automatically rolled back.
+author: 'your-org'
+branding:
+  icon: 'tag'
+  color: 'blue'
+
+inputs:
+  tag:
+    description: 'Tag to create, e.g. v1.2.3'
+    required: true
+  target:
+    description: 'Branch or commit the tag should point to'
+    required: false
+    default: 'main'
+  draft:
+    description: 'Create the release as a draft'
+    required: false
+    default: 'false'
+  prerelease:
+    description: 'Mark the release as a pre-release'
+    required: false
+    default: 'false'
+  github-token:
+    description: 'Token used to push the tag and manage the release'
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  tag:
+    description: 'The tag that was created'
+    value: ${{ steps.release.outputs.tag }}
+  release_id:
+    description: 'ID of the created GitHub release'
+    value: ${{ steps.release.outputs.release_id }}
+  release_url:
+    description: 'HTML URL of the created GitHub release'
+    value: ${{ steps.release.outputs.release_url }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Install dependencies
+      shell: bash
+      run: pip install -r "${{ github.action_path }}/requirements.txt"
+
+    - name: Create tag and release
+      id: release
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+      run: |
+        python "${{ github.action_path }}/scripts/release.py" \
+          --tag "${{ inputs.tag }}" \
+          --target "${{ inputs.target }}" \
+          $( [ "${{ inputs.draft }}" = "true" ] && echo "--draft" ) \
+          $( [ "${{ inputs.prerelease }}" = "true" ] && echo "--prerelease" )
