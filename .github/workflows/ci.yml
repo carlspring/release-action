@@ -22,7 +22,10 @@ jobs:
         run: pip install -r requirements.txt flake8
 
       - name: Check syntax
-        run: python -m py_compile scripts/release.py
+        run: python -m py_compile scripts/*.py
 
       - name: Lint
-        run: flake8 scripts/release.py --max-line-length=100
+        run: flake8 scripts tests --max-line-length=100
+
+      - name: Test
+        run: python -m unittest discover -s tests -v

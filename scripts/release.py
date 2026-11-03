@@ -10,10 +10,11 @@ Environment variables required:
 
 Optional:
     GITHUB_OUTPUT        Path to the file GitHub Actions collects outputs from
+    GITHUB_SERVER_URL    GitHub base URL used for commit links (default https://github.com)
 
 Usage:
     python release.py --tag v1.2.3 [--target main] [--draft] [--prerelease]
-                      [--aliases v1 v1.0]
+                      [--aliases v1 v1.0] [--group-by pull-request|commit]
 """
 import argparse
 import os
@@ -21,6 +22,8 @@ import subprocess
 import sys
 import time
 import requests
+
+from release_notes import commit_entries, pr_entries, render_sections
 
 API_URL = "https://api.github.com"
 
@@ -121,25 +124,6 @@ class GitHubClient:
         return prs
 
 
-def _format_pr_attribution(pr):
-    """Return the attribution string for a PR, e.g. '@carlspring, @Copilot'.
-
-    Rules:
-    - Bot-suffix usernames like 'dependabot[bot]' are normalised to 'dependabot'.
-    - PRs authored by Copilot list the non-Copilot assignees first, then @Copilot.
-    """
-    def clean(login):
-        return login.replace("[bot]", "")
-
-    author = clean(pr["user"])
-    # The GitHub Copilot SWE agent uses the plain login "Copilot" (no [bot] suffix).
-    if author == "Copilot":
-        others = [clean(a) for a in pr.get("assignees", []) if clean(a) != "Copilot"]
-        mentions = others + ["Copilot"]
-        return ", ".join(f"@{m}" for m in mentions)
-    return f"@{author}"
-
-
 def get_previous_tag():
     """Return the most recent tag reachable from HEAD, or None if there isn't one."""
     result = subprocess.run(
@@ -151,48 +135,47 @@ def get_previous_tag():
     return result.stdout.strip()
 
 
-def get_commits_in_range(previous_tag):
-    """Return a list of commit SHAs reachable from HEAD but not from previous_tag.
+def get_commits(previous_tag):
+    """Return the non-merge commits reachable from HEAD but not from previous_tag.
 
-    If previous_tag is None, returns an empty list (caller will fall back to git log).
+    Each commit is a dict with "sha" and the full "message", newest first.
+    If previous_tag is None, the whole history of HEAD is returned.
     """
-    if not previous_tag:
-        return []
+    rev_range = f"{previous_tag}..HEAD" if previous_tag else "HEAD"
     result = subprocess.run(
-        ["git", "log", f"{previous_tag}..HEAD", "--pretty=format:%H", "--no-merges"],
+        ["git", "log", rev_range, "--no-merges", "--pretty=format:%H%x1f%B%x1e"],
         capture_output=True, text=True,
     )
     if result.returncode != 0:
         return []
-    return [sha for sha in result.stdout.strip().splitlines() if sha]
+    commits = []
+    for record in result.stdout.split("\x1e"):
+        if not record.strip():
+            continue
+        sha, _, message = record.strip().partition("\x1f")
+        commits.append({"sha": sha, "message": message})
+    return commits
 
 
-def build_release_body(gh, previous_tag, alias_list):
-    """Build the GitHub release body from merged PRs since previous_tag.
+def build_release_body(gh, previous_tag, alias_list, group_by, repo_url):
+    """Build the GitHub release body from the changes since previous_tag.
 
-    Uses the git commit range (previous_tag..HEAD) to identify which commits
-    belong to this release, then resolves those commits to their associated PRs
-    via the GitHub API. Falls back to a plain git log when no PRs are found.
+    The commits in previous_tag..HEAD are grouped into sections (Features,
+    Bug Fixes, ...) by their Conventional Commits prefix. With
+    group_by="pull-request" the commits are first resolved to their merged PRs
+    and each PR is categorised by its title; if no PRs are found (or there is
+    no previous tag, to avoid one API request per commit in the whole history),
+    the commits are listed instead.
     """
-    commit_shas = get_commits_in_range(previous_tag)
+    commits = get_commits(previous_tag)
 
-    pr_list = gh.get_prs_for_commits(commit_shas) if commit_shas else []
-    if pr_list:
-        lines = [
-            (f'* <a href="{pr["html_url"]}">'
-             f'#{pr["number"]}: {pr["title"]}</a> ({_format_pr_attribution(pr)})')
-            for pr in pr_list
-        ]
-        changelog = "\n".join(lines)
-    else:
-        # Fall back to git log when no PRs are found
-        rev_range = f"{previous_tag}..HEAD" if previous_tag else "HEAD"
-        log = run(
-            ["git", "log", rev_range, "--pretty=format:- %s (%h)", "--no-merges"],
-            check=False,
-        )
-        changelog = log if log else "No changes recorded."
+    entries = []
+    if group_by == "pull-request" and previous_tag and commits:
+        entries = pr_entries(gh.get_prs_for_commits([c["sha"] for c in commits]))
+    if not entries:
+        entries = commit_entries(commits, repo_url)
 
+    changelog = render_sections(entries) or "No changes recorded."
     sections = [f"## Changes since {previous_tag or 'the beginning'}\n\n{changelog}"]
 
     for alias in alias_list:
@@ -241,6 +224,13 @@ def main():
         help="Space-separated alias tags to create, e.g. 'v1 v1.0'. "
              "Overridden by the RELEASE_ALIASES environment variable if set.",
     )
+    parser.add_argument(
+        "--group-by",
+        choices=["pull-request", "commit"],
+        default="pull-request",
+        help="List the merged pull requests (default) or the individual commits "
+             "in the release notes, grouped by their Conventional Commits type.",
+    )
     args = parser.parse_args()
     # Allow aliases to be supplied via env var (avoids shell word-splitting issues).
     # The env var takes precedence only when it is non-empty.
@@ -255,6 +245,8 @@ def main():
         sys.exit(1)
 
     gh = GitHubClient(token, repo)
+    server_url = os.environ.get("GITHUB_SERVER_URL", "https://github.com").rstrip("/")
+    repo_url = f"{server_url}/{repo}"
 
     tag_created = False
     release = None
@@ -271,8 +263,8 @@ def main():
         create_git_tag(args.tag, f"Release {args.tag}")
         tag_created = True
 
-        # 2. Build release body from merged PRs since the previous tag
-        body = build_release_body(gh, previous_tag, alias_list)
+        # 2. Build release body from the changes since the previous tag
+        body = build_release_body(gh, previous_tag, alias_list, args.group_by, repo_url)
         print("Release body:\n" + body)
 
         # 3. Create the GitHub release from that tag
