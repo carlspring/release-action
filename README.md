@@ -11,7 +11,10 @@ and release if anything goes wrong partway through.
 ## Features
 
 - 🏷️ Creates and pushes an annotated git tag
-- 📝 Builds release notes from `git log <previous-tag>..HEAD`
+- 📝 Builds release notes from the commits since the previous tag, grouped into
+  Features, Bug Fixes, Documentation, CI, … by their
+  [Conventional Commits](https://www.conventionalcommits.org) prefix
+- 🔀 Lists either the merged pull requests or the individual commits
 - 🚀 Publishes a GitHub release for that tag
 - 🔗 Optionally creates alias tags (e.g. `v1`, `v1.0`) pointing to the same commit
 - ↩️ Rolls back the tag, alias tags, and release on any failure
@@ -87,6 +90,7 @@ Trigger it from the **Actions** tab → **Create Release** → **Run workflow**.
 | `draft`        | No       | `false`               | Create the release as a draft                     |
 | `prerelease`   | No       | `false`               | Mark the release as a pre-release                 |
 | `aliases`      | No       | `''`                  | Space-separated alias tags, e.g. `"v1 v1.0"`      |
+| `group-by`     | No       | `pull-request`        | List `pull-request`s or `commit`s in the notes    |
 | `github-token` | No       | `${{ github.token }}` | Token used to push the tag and manage the release |
 
 ## Outputs
@@ -107,6 +111,52 @@ permissions:
 ```
 
 so the default `GITHUB_TOKEN` can push tags and create releases.
+
+## Release notes
+
+The release notes list the changes since the previous tag, grouped into
+sections by their [Conventional Commits](https://www.conventionalcommits.org)
+prefix (`type(scope): subject`):
+
+| Prefix     | Section          |
+|------------|------------------|
+| `feat`     | Features         |
+| `fix`      | Bug Fixes        |
+| `perf`     | Performance      |
+| `refactor` | Code Refactoring |
+| `docs`     | Documentation    |
+| `test`     | Tests            |
+| `build`    | Build            |
+| `ci`       | CI               |
+| `style`    | Styles           |
+| `revert`   | Reverts          |
+| `chore`    | Chores           |
+
+Anything without one of these prefixes goes under **Other Changes**. Breaking
+changes (`feat!: …` or a `BREAKING CHANGE:` footer) are listed once, in a
+**⚠ Breaking Changes** section at the top. Empty sections are left out.
+
+The `group-by` input chooses what each line represents:
+
+- `pull-request` (default): the merged pull requests that contain the commits
+  since the previous tag, categorised by their **title**:
+
+  ```markdown
+  ### Features
+
+  - **tracing**: wire OpenTelemetry export ([#42](https://github.com/org/repo/pull/42)) (@carlspring)
+  ```
+
+  If no pull requests are found, or there is no previous tag, the commits are
+  listed instead.
+
+- `commit`: the individual (non-merge) commits, categorised by their message:
+
+  ```markdown
+  ### Bug Fixes
+
+  - **publishing**: declare explicit dependency versions ([6840708a](https://github.com/org/repo/commit/6840708a91b2...))
+  ```
 
 ## How rollback works
 
@@ -135,7 +185,9 @@ workflow.
 ├── action.yml                            # Action metadata (inputs/outputs, runs config)
 ├── requirements.txt                      # Python dependencies
 ├── scripts/
-│   └── release.py                        # Core logic: tag, release, rollback
+│   ├── release.py                        # Core logic: tag, release, rollback
+│   └── release_notes.py                  # Groups commits/PRs into release-note sections
+├── tests/                                # Unit tests (unittest)
 └── .github/workflows/
     ├── ci.yml                            # Lints/validates the action's source
     └── release.yml                       # Example consumer workflow
@@ -153,8 +205,14 @@ export GITHUB_REPOSITORY=your-org/your-repo
 python scripts/release.py --tag v0.0.1-test --target main
 ```
 
-CI (`.github/workflows/ci.yml`) compiles and lints `scripts/release.py` on
-every push and pull request against `main`.
+Run the tests (standard-library `unittest`, no extra dependencies):
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+CI (`.github/workflows/ci.yml`) compiles, lints and tests the scripts on every
+push and pull request against `main`.
 
 ## License
 

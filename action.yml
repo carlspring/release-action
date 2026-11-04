@@ -31,6 +31,14 @@ inputs:
       same commit. Alias tags are deleted if rollback is triggered.
     required: false
     default: ''
+  group-by:
+    description: >
+      How to list the changes in the release notes: "pull-request" lists the
+      merged pull requests, "commit" lists the individual commits. Either way
+      they are grouped into sections (Features, Bug Fixes, ...) by their
+      Conventional Commits prefix, e.g. "feat(api): ...".
+    required: false
+    default: 'pull-request'
   github-token:
     description: 'Token used to push the tag and manage the release'
     required: false
@@ -66,9 +74,11 @@ runs:
         GITHUB_TOKEN: ${{ inputs.github-token }}
         GITHUB_REPOSITORY: ${{ github.repository }}
         RELEASE_ALIASES: ${{ inputs.aliases }}
+        RELEASE_GROUP_BY: ${{ inputs.group-by }}
       run: |
         python "${{ github.action_path }}/scripts/release.py" \
         --tag "${{ inputs.tag }}" \
         --target "${{ inputs.target }}" \
+        --group-by "$RELEASE_GROUP_BY" \
         $( [ "${{ inputs.draft }}" = "true" ] && echo "--draft" ) \
         $( [ "${{ inputs.prerelease }}" = "true" ] && echo "--prerelease" )
