@@ -13,8 +13,11 @@ Optional:
     GITHUB_SERVER_URL    GitHub base URL used for commit links (default https://github.com)
 
 Usage:
-    python release.py --tag v1.2.3 [--target main] [--draft] [--prerelease]
+    python release.py [--tag v1.2.3] [--target main] [--draft] [--prerelease]
                       [--aliases v1 v1.0] [--group-by pull-request|commit]
+
+If --tag is omitted (or empty), the next version is computed from the existing
+tags; see next_version.py.
 """
 import argparse
 import os
@@ -23,6 +26,7 @@ import sys
 import time
 import requests
 
+from next_version import get_tags, next_version
 from release_notes import commit_entries, pr_entries, render_sections
 
 API_URL = "https://api.github.com"
@@ -213,7 +217,12 @@ def main():
     parser = argparse.ArgumentParser(
         description="Create a tagged GitHub release with rollback on failure."
     )
-    parser.add_argument("--tag", required=True, help="Tag to create, e.g. v1.2.3")
+    parser.add_argument(
+        "--tag",
+        default="",
+        help="Tag to create, e.g. v1.2.3. If omitted, the next version is computed "
+             "from the latest version tag.",
+    )
     parser.add_argument("--target", default="main", help="Branch/commit the tag points to")
     parser.add_argument("--draft", action="store_true")
     parser.add_argument("--prerelease", action="store_true")
@@ -258,6 +267,10 @@ def main():
 
         previous_tag = get_previous_tag()
         print(f"Previous tag: {previous_tag or '(none found)'}")
+
+        if not args.tag:
+            args.tag = next_version(get_tags())
+            print(f"No tag given; computed next version: {args.tag}")
 
         # 1. Create and push the git tag
         create_git_tag(args.tag, f"Release {args.tag}")
