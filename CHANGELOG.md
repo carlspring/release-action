@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 ### Added
 - The `tag` input is now optional: if it is empty, the next version is computed
-  from the latest version tag (`1.2.3` → `1.3.0`, `1.2.3-rc-1` → `1.2.3-rc-2`,
+  from the latest version tag (`1.2.3` → `1.2.4`, `1.2.3-rc-1` → `1.2.3-rc-2`,
   `1.0.0` when there are no version tags).
 - Release notes are grouped into sections (Features, Bug Fixes, Performance,
   Code Refactoring, Documentation, Tests, Build, CI, Styles, Reverts, Chores,

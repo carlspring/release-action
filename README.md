@@ -121,18 +121,20 @@ version tag reachable from `target`:
 
 | Latest tag    | Next version  | Rule                                           |
 |---------------|---------------|------------------------------------------------|
-| `1.2.3`       | `1.3.0`       | Increment the minor number, reset the patch    |
-| `v1.2.3`      | `v1.3.0`      | A `v` prefix is kept                           |
+| `1.2.3`       | `1.2.4`       | Increment the patch number                     |
+| `v1.2.3`      | `v1.2.4`      | A `v` prefix is kept                           |
 | `1.2.3-rc-1`  | `1.2.3-rc-2`  | Increment the number of a `-TYPE-N` suffix     |
-| `1.2.3-beta`  | `1.3.0`       | Any other suffix: increment the minor number   |
+| `1.2.3-beta`  | `1.2.4`       | Any other suffix: increment the patch number   |
 | *(none)*      | `1.0.0`       | No version tags yet                            |
 
 Only tags of the form `[v]MAJOR.MINOR.PATCH[-SUFFIX]` count; alias tags such as
 `v1` or `v1.0` are ignored. Of those, the highest version wins, and a final
 release ranks above its pre-releases (so after `1.0.0-rc-2` and `1.0.0` the next
-version is `1.1.0`). The computed tag is available as the `tag` output.
+version is `1.0.1`). Tags with and without the `v` prefix are compared by their
+numbers, and the next version keeps the style of the latest one (after `1.1.0`
+and `v1.2.0` it is `v1.2.1`). The computed tag is available as the `tag` output.
 
-For a patch or major release, or to start a pre-release series, pass the `tag`
+For a minor or major release, or to start a pre-release series, pass the `tag`
 explicitly.
 
 ## Release notes

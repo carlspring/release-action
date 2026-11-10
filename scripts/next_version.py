@@ -6,9 +6,9 @@ and an optional "-SUFFIX" (e.g. "1.2.3", "v1.2.3", "1.2.3-rc-1"). Tags that
 don't match (alias tags such as "v1", or anything else) are ignored.
 
 The latest version tag is bumped as follows:
-    1.2.3        -> 1.3.0         (increment the minor number, reset the patch number)
+    1.2.3        -> 1.2.4         (increment the patch number)
     1.2.3-rc-1   -> 1.2.3-rc-2    (increment the pre-release number)
-    1.2.3-beta   -> 1.3.0         (unrecognised suffix: increment the minor number)
+    1.2.3-beta   -> 1.2.4         (unrecognised suffix: increment the patch number)
 The "v" prefix, if any, is kept. With no version tags at all, the result is
 INITIAL_VERSION.
 """
@@ -51,7 +51,7 @@ def bump(tag):
     pre = _SUFFIX_RE.match(match["suffix"] or "")
     if pre:
         return f"{prefix}{major}.{minor}.{patch}-{pre['type']}-{int(pre['number']) + 1}"
-    return f"{prefix}{major}.{int(minor) + 1}.0"
+    return f"{prefix}{major}.{minor}.{int(patch) + 1}"
 
 
 def next_version(tags):

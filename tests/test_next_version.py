@@ -11,18 +11,20 @@ import next_version  # noqa: E402
 
 class BumpTest(unittest.TestCase):
 
-    def test_increments_minor_and_resets_patch(self):
-        self.assertEqual(next_version.bump("1.2.3"), "1.3.0")
+    def test_increments_patch(self):
+        self.assertEqual(next_version.bump("1.2.3"), "1.2.4")
 
     def test_keeps_v_prefix(self):
-        self.assertEqual(next_version.bump("v1.2.3"), "v1.3.0")
+        self.assertEqual(next_version.bump("v1.2.3"), "v1.2.4")
 
     def test_increments_pre_release_number(self):
         self.assertEqual(next_version.bump("1.2.3-rc-1"), "1.2.3-rc-2")
         self.assertEqual(next_version.bump("v2.0.0-milestone-9"), "v2.0.0-milestone-10")
 
-    def test_unrecognised_suffix_increments_minor(self):
-        self.assertEqual(next_version.bump("1.2.3-beta"), "1.3.0")
+    def test_unrecognised_suffix_increments_patch(self):
+        self.assertEqual(next_version.bump("1.2.3-beta"), "1.2.4")
+        self.assertEqual(next_version.bump("1.2.3-rc1"), "1.2.4")
+        self.assertEqual(next_version.bump("1.2.3-rc.1"), "1.2.4")
 
     def test_rejects_non_version(self):
         with self.assertRaises(ValueError):
@@ -38,13 +40,17 @@ class NextVersionTest(unittest.TestCase):
         self.assertEqual(next_version.next_version(["v1", "latest"]), "1.0.0")
 
     def test_ignores_alias_tags(self):
-        self.assertEqual(next_version.next_version(["v1", "v1.0", "v1.0.3"]), "v1.1.0")
+        self.assertEqual(next_version.next_version(["v1", "v1.0", "v1.0.3"]), "v1.0.4")
 
     def test_picks_highest_version_numerically(self):
-        self.assertEqual(next_version.next_version(["1.9.0", "1.10.0", "1.2.0"]), "1.11.0")
+        self.assertEqual(next_version.next_version(["1.9.0", "1.10.0", "1.2.0"]), "1.10.1")
+
+    def test_mixed_prefixes_compare_by_number_and_keep_the_latest_style(self):
+        self.assertEqual(next_version.next_version(["1.1.0", "v1.2.0"]), "v1.2.1")
+        self.assertEqual(next_version.next_version(["v1.1.0", "1.2.0"]), "1.2.1")
 
     def test_final_release_beats_its_pre_releases(self):
-        self.assertEqual(next_version.next_version(["1.0.0-rc-2", "1.0.0"]), "1.1.0")
+        self.assertEqual(next_version.next_version(["1.0.0-rc-2", "1.0.0"]), "1.0.1")
 
     def test_newer_pre_release_is_bumped(self):
         self.assertEqual(
