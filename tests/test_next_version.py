@@ -18,13 +18,18 @@ class BumpTest(unittest.TestCase):
         self.assertEqual(next_version.bump("v1.2.3"), "v1.2.4")
 
     def test_increments_pre_release_number(self):
+        self.assertEqual(next_version.bump("1.2.3-alpha-1"), "1.2.3-alpha-2")
+        self.assertEqual(next_version.bump("1.2.3-beta-1"), "1.2.3-beta-2")
+        self.assertEqual(next_version.bump("1.2.3-milestone-1"), "1.2.3-milestone-2")
         self.assertEqual(next_version.bump("1.2.3-rc-1"), "1.2.3-rc-2")
         self.assertEqual(next_version.bump("v2.0.0-milestone-9"), "v2.0.0-milestone-10")
 
-    def test_unrecognised_suffix_increments_patch(self):
-        self.assertEqual(next_version.bump("1.2.3-beta"), "1.2.4")
-        self.assertEqual(next_version.bump("1.2.3-rc1"), "1.2.4")
-        self.assertEqual(next_version.bump("1.2.3-rc.1"), "1.2.4")
+    def test_rejects_unconventional_suffix(self):
+        for tag in ("1.2.3-beta", "1.2.3-rc1", "1.2.3-rc.1", "1.2.3-foo-7", "1.2.3-RC-1",
+                    "1.2.3-dev-1"):
+            with self.subTest(tag=tag):
+                with self.assertRaisesRegex(ValueError, f"{tag} doesn't follow"):
+                    next_version.bump(tag)
 
     def test_rejects_non_version(self):
         with self.assertRaises(ValueError):
@@ -51,6 +56,22 @@ class NextVersionTest(unittest.TestCase):
 
     def test_final_release_beats_its_pre_releases(self):
         self.assertEqual(next_version.next_version(["1.0.0-rc-2", "1.0.0"]), "1.0.1")
+
+    def test_pre_release_types_rank_alpha_beta_milestone_rc(self):
+        tags = ["1.0.0-rc-1", "1.0.0-alpha-5", "1.0.0-milestone-2", "1.0.0-beta-3"]
+        self.assertEqual(next_version.next_version(tags), "1.0.0-rc-2")
+        self.assertEqual(next_version.next_version(tags[1:]), "1.0.0-milestone-3")
+
+    def test_unconventional_latest_tag_fails(self):
+        with self.assertRaises(ValueError):
+            next_version.next_version(["1.0.0", "1.0.1-beta"])
+
+    def test_unconventional_tag_is_not_skipped_in_favour_of_pre_releases(self):
+        with self.assertRaises(ValueError):
+            next_version.next_version(["1.0.1-rc-1", "1.0.1-rc1"])
+
+    def test_unconventional_tag_of_older_version_is_harmless(self):
+        self.assertEqual(next_version.next_version(["1.0.0-beta", "1.0.0", "1.0.1"]), "1.0.2")
 
     def test_newer_pre_release_is_bumped(self):
         self.assertEqual(

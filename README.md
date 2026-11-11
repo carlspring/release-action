@@ -119,13 +119,29 @@ so the default `GITHUB_TOKEN` can push tags and create releases.
 If `tag` is left empty, the action computes the next version from the latest
 version tag reachable from `target`:
 
-| Latest tag    | Next version  | Rule                                           |
-|---------------|---------------|------------------------------------------------|
-| `1.2.3`       | `1.2.4`       | Increment the patch number                     |
-| `v1.2.3`      | `v1.2.4`      | A `v` prefix is kept                           |
-| `1.2.3-rc-1`  | `1.2.3-rc-2`  | Increment the number of a `-TYPE-N` suffix     |
-| `1.2.3-beta`  | `1.2.4`       | Any other suffix: increment the patch number   |
-| *(none)*      | `1.0.0`       | No version tags yet                            |
+| Latest tag          | Next version        | Rule                                  |
+|---------------------|---------------------|---------------------------------------|
+| `1.2.3`             | `1.2.4`             | Increment the patch number            |
+| `v1.2.3`            | `v1.2.4`            | A `v` prefix is kept                  |
+| `1.2.3-alpha-1`     | `1.2.3-alpha-2`     | Increment the pre-release number      |
+| `1.2.3-beta-1`      | `1.2.3-beta-2`      | Increment the pre-release number      |
+| `1.2.3-milestone-1` | `1.2.3-milestone-2` | Increment the pre-release number      |
+| `1.2.3-rc-1`        | `1.2.3-rc-2`        | Increment the pre-release number      |
+| `1.2.3-beta`        | *(fails)*           | Doesn't follow the convention         |
+| *(none)*            | `1.0.0`             | No version tags yet                   |
+
+Pre-releases must follow the convention `-alpha-N`, `-beta-N`, `-milestone-N`
+or `-rc-N`, and rank in that order, below their final release:
+
+```
+1.2.3-alpha-1 < 1.2.3-beta-1 < 1.2.3-milestone-1 < 1.2.3-rc-1 < 1.2.3
+```
+
+If the latest version tag has any other suffix (e.g. `1.2.3-beta`, `1.2.3-rc1`,
+`1.2.3-rc.1`, `1.2.3-RC-1`), the action doesn't guess: it fails before creating
+anything and asks for the `tag` to be set explicitly. Such a tag ranks above the
+pre-releases of its version, so it can't be skipped silently, but it's harmless
+once a newer version exists.
 
 Only tags of the form `[v]MAJOR.MINOR.PATCH[-SUFFIX]` count; alias tags such as
 `v1` or `v1.0` are ignored. Of those, the highest version wins, and a final
