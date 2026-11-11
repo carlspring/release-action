@@ -11,6 +11,7 @@ and release if anything goes wrong partway through.
 ## Features
 
 - 🏷️ Creates and pushes an annotated git tag
+- 🔢 Computes the next version from the latest tag when no tag is given
 - 📝 Builds release notes from the commits since the previous tag, grouped into
   Features, Bug Fixes, Documentation, CI, … by their
   [Conventional Commits](https://www.conventionalcommits.org) prefix
@@ -29,8 +30,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag to create (e.g. v1.2.3)'
-        required: true
+        description: 'Tag to create (e.g. v1.2.3); leave empty to compute the next version'
+        required: false
+        default: ''
         type: string
       target:
         description: 'Branch or commit to tag'
@@ -85,7 +87,7 @@ Trigger it from the **Actions** tab → **Create Release** → **Run workflow**.
 
 | Name           | Required | Default               | Description                                       |
 |----------------|----------|-----------------------|---------------------------------------------------|
-| `tag`          | Yes      | —                     | Tag to create, e.g. `v1.2.3`                      |
+| `tag`          | No       | `''`                  | Tag to create, e.g. `v1.2.3`; [computed](#computed-versions) if empty |
 | `target`       | No       | `main`                | Branch or commit the tag should point to          |
 | `draft`        | No       | `false`               | Create the release as a draft                     |
 | `prerelease`   | No       | `false`               | Mark the release as a pre-release                 |
@@ -97,7 +99,7 @@ Trigger it from the **Actions** tab → **Create Release** → **Run workflow**.
 
 | Name          | Description                            |
 |---------------|----------------------------------------|
-| `tag`         | The tag that was created               |
+| `tag`         | The tag that was created (given or computed) |
 | `release_id`  | ID of the created GitHub release       |
 | `release_url` | HTML URL of the created GitHub release |
 
@@ -111,6 +113,45 @@ permissions:
 ```
 
 so the default `GITHUB_TOKEN` can push tags and create releases.
+
+## Computed versions
+
+If `tag` is left empty, the action computes the next version from the latest
+version tag reachable from `target`:
+
+| Latest tag          | Next version        | Rule                                  |
+|---------------------|---------------------|---------------------------------------|
+| `1.2.3`             | `1.2.4`             | Increment the patch number            |
+| `v1.2.3`            | `v1.2.4`            | A `v` prefix is kept                  |
+| `1.2.3-alpha-1`     | `1.2.3-alpha-2`     | Increment the pre-release number      |
+| `1.2.3-beta-1`      | `1.2.3-beta-2`      | Increment the pre-release number      |
+| `1.2.3-milestone-1` | `1.2.3-milestone-2` | Increment the pre-release number      |
+| `1.2.3-rc-1`        | `1.2.3-rc-2`        | Increment the pre-release number      |
+| `1.2.3-beta`        | *(fails)*           | Doesn't follow the convention         |
+| *(none)*            | `1.0.0`             | No version tags yet                   |
+
+Pre-releases must follow the convention `-alpha-N`, `-beta-N`, `-milestone-N`
+or `-rc-N`, and rank in that order, below their final release:
+
+```
+1.2.3-alpha-1 < 1.2.3-beta-1 < 1.2.3-milestone-1 < 1.2.3-rc-1 < 1.2.3
+```
+
+If the latest version tag has any other suffix (e.g. `1.2.3-beta`, `1.2.3-rc1`,
+`1.2.3-rc.1`, `1.2.3-RC-1`), the action doesn't guess: it fails before creating
+anything and asks for the `tag` to be set explicitly. Such a tag ranks above the
+pre-releases of its version, so it can't be skipped silently, but it's harmless
+once a newer version exists.
+
+Only tags of the form `[v]MAJOR.MINOR.PATCH[-SUFFIX]` count; alias tags such as
+`v1` or `v1.0` are ignored. Of those, the highest version wins, and a final
+release ranks above its pre-releases (so after `1.0.0-rc-2` and `1.0.0` the next
+version is `1.0.1`). Tags with and without the `v` prefix are compared by their
+numbers, and the next version keeps the style of the latest one (after `1.1.0`
+and `v1.2.0` it is `v1.2.1`). The computed tag is available as the `tag` output.
+
+For a minor or major release, or to start a pre-release series, pass the `tag`
+explicitly.
 
 ## Release notes
 
@@ -186,6 +227,7 @@ workflow.
 ├── requirements.txt                      # Python dependencies
 ├── scripts/
 │   ├── release.py                        # Core logic: tag, release, rollback
+│   ├── next_version.py                   # Computes the next version from the tags
 │   └── release_notes.py                  # Groups commits/PRs into release-note sections
 ├── tests/                                # Unit tests (unittest)
 └── .github/workflows/
